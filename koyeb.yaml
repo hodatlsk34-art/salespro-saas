@@ -1,0 +1,20 @@
+app_name: salespro-saas
+
+services:
+  - name: api
+    git:
+      branch: main
+    build:
+      builder: buildpack
+      build_command: pip install -r backend/requirements.txt
+    run:
+      command: cd backend && uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - port: 8000
+        protocol: http
+    env:
+      - key: DATABASE_URL
+        value: "THAY_BANG_SUPABASE_URL"
+    health_checks:
+      - path: /health
+        port: 8000

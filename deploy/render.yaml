@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: salespro-saas
+    env: python
+    region: singapore   # gần Việt Nam nhất
+    plan: free           # free tier: 512MB RAM, ngủ sau 15 phút không dùng
+    # plan: starter      # $7/tháng: luôn hoạt động — khuyến nghị production
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DB_PATH
+        value: /opt/render/project/data/salespro.db
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+    disk:
+      name: salespro-data
+      mountPath: /opt/render/project/data
+      sizeGB: 1
