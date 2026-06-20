@@ -1768,15 +1768,32 @@ function buildReceiptHTML(orderNum, custName, items, sub, disc, vat, total, payM
   </body></html>`;
 }
 
-// ── In / Xuất theo phương thức ────────────────────────────────
+// ── In / Xuất theo phương thức (dùng iframe ẩn — không bị popup blocker chặn) ──
 function printReceipt(orderNum, custName, items, sub, disc, vat, total, payMethod) {
   const m = printerCfg.method;
   if (m === 'pdf' || m === 'browser') {
     const html = buildReceiptHTML(orderNum, custName, items, sub, disc, vat, total, payMethod);
-    const win = window.open('', '_blank', 'width=350,height=600');
-    win.document.write(html);
-    win.document.close();
-    win.onload = () => { win.focus(); win.print(); };
+
+    // Dùng iframe ẩn thay cho window.open() — không bị Chrome popup-blocker chặn
+    // dù được gọi sau await/setTimeout (mất "user activation")
+    let frame = document.getElementById('print-frame');
+    if (!frame) {
+      frame = document.createElement('iframe');
+      frame.id = 'print-frame';
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+      document.body.appendChild(frame);
+    }
+    const doc = frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+
+    frame.onload = () => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch(e) { console.warn('Print error:', e); }
+    };
+    // Một số browser không fire onload cho document.write — gọi thêm 1 lần dự phòng
+    setTimeout(() => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch(e){}
+    }, 250);
   } else if (m === 'usb') {
     toast('🖨 Đang gửi lệnh in đến cổng '+printerCfg.usbPort+'...', 'info');
     toast('⚠️ In USB/Serial chỉ hoạt động trong SalesPro Python App', 'info');
@@ -2905,6 +2922,35 @@ async function apiLogin(shopSlug, username, password){
 }
 
 // ── Đồng bộ toàn bộ dữ liệu từ server về client ─────────────
+// Chuyển đổi ngày từ format server (YYYY-MM-DD...) sang format app dùng (DD/MM/YYYY)
+// Đây là điểm mấu chốt để các phép so sánh "hôm nay"/"tháng này" hoạt động đúng
+function apiDateToVN(isoStr){
+  if(!isoStr) return '';
+  // Server lưu giờ UTC (datetime('now') của SQLite/Postgres) — cần cộng +7 giờ
+  // để ra đúng ngày theo giờ Việt Nam trước khi tách ngày/tháng/năm.
+  // Nếu không làm vậy, đơn hàng tạo lúc 00:00–06:59 giờ VN sẽ bị tính nhầm
+  // sang "ngày hôm trước" vì giờ UTC tương ứng vẫn còn ở ngày trước đó.
+  const cleanStr = isoStr.replace(' ', 'T') + (isoStr.includes('Z')||isoStr.includes('+') ? '' : 'Z');
+  const utcDate = new Date(cleanStr);
+  if(isNaN(utcDate.getTime())) return '';
+  const vnDate = new Date(utcDate.getTime() + 7*60*60*1000);
+  const y = vnDate.getUTCFullYear();
+  const m = String(vnDate.getUTCMonth()+1).padStart(2,'0');
+  const d = String(vnDate.getUTCDate()).padStart(2,'0');
+  return `${d}/${m}/${y}`;
+}
+
+function apiTimeToVN(isoStr){
+  if(!isoStr) return '';
+  const cleanStr = isoStr.replace(' ', 'T') + (isoStr.includes('Z')||isoStr.includes('+') ? '' : 'Z');
+  const utcDate = new Date(cleanStr);
+  if(isNaN(utcDate.getTime())) return '';
+  const vnDate = new Date(utcDate.getTime() + 7*60*60*1000);
+  const h = String(vnDate.getUTCHours()).padStart(2,'0');
+  const mi = String(vnDate.getUTCMinutes()).padStart(2,'0');
+  return `${h}:${mi}`;
+}
+
 async function syncFromApi(){
   if(!_useApi || !_apiToken) return;
   const [prods, custs, invs, staffs, ords] = await Promise.all([
@@ -2931,7 +2977,8 @@ async function syncFromApi(){
   if(ords){ ORDERS.length=0; ORDERS.push(...ords.map(o=>({
     no:o.order_no, custName:o.customer_name, total:o.total,
     sub:o.subtotal, vat:o.vat, payMethod:o.pay_method,
-    date:(o.created_at||'').slice(0,10), time:(o.created_at||'').slice(11,16)
+    date: apiDateToVN(o.created_at), time: apiTimeToVN(o.created_at),
+    items: (o.items||[]).map(it=>[it.product_name, it.unit_price, it.quantity])
   }))); }
 
   if(invs){ INV_DATA.length=0; INV_DATA.push(...invs.map(i=>({
@@ -2940,7 +2987,7 @@ async function syncFromApi(){
     prod:i.product_name, qty:(i.type==='XK'?'-':'+')+i.quantity,
     rawQty:i.quantity, price:i.unit_price,
     total:i.total_value ? i.total_value.toLocaleString('vi-VN')+'đ' : '—',
-    sup:i.supplier_name||'—', date:(i.created_at||'').slice(0,10),
+    sup:i.supplier_name||'—', date: apiDateToVN(i.created_at),
     user:i.created_by_name||'—', sl:i.status,
     sc: i.status==='Đã duyệt' ? 'bg' : i.status==='Chờ duyệt' ? 'ba' : 'br'
   }))); }
@@ -2970,6 +3017,17 @@ window.checkout = async function(){
   if(!_useApi){ _localCheckout(); return; }
   if(!Object.keys(cart).length){ toast('Đơn hàng trống','error'); return; }
 
+  // Mở sẵn cửa sổ in TRỐNG ngay lúc này — phải làm NGAY, đồng bộ với
+  // click của người dùng, trước bất kỳ await/setTimeout nào. Nếu mở
+  // popup sau khi đã "await" một Promise, trình duyệt không còn coi
+  // đây là hành động trực tiếp từ người dùng và sẽ tự chặn popup.
+  const willPrint = printerCfg.method==='pdf' || (printerCfg.method==='browser'&&printerCfg.brAuto);
+  let printWin = null;
+  if(willPrint){
+    printWin = window.open('', '_blank', 'width=350,height=600');
+    if(printWin) printWin.document.write('<p style="font-family:sans-serif;padding:20px;color:#888">Đang tạo hóa đơn...</p>');
+  }
+
   const custVal  = document.getElementById('cart-cust').value;
   const custId   = custVal==='0' ? null : (CUSTS[+custVal-1]?.id || null);
   const custName = custVal==='0' ? 'Vãng lai' : (CUSTS[+custVal-1]?.name || 'Vãng lai');
@@ -2983,7 +3041,11 @@ window.checkout = async function(){
   const res = await api('POST','/orders', {
     customer_id: custId, customer_name: custName, items, pay_method: payMethod
   });
-  if(!res){ toast('Lỗi tạo đơn hàng','error'); return; }
+  if(!res){
+    toast('Lỗi tạo đơn hàng','error');
+    if(printWin && !printWin.closed) printWin.close();
+    return;
+  }
 
   toast(`✅ ${res.order_no} — ${custName} — ${fmtM(res.total)}`, 'success');
   ORDERS.push({
@@ -3000,15 +3062,20 @@ window.checkout = async function(){
   renderCart(); renderPOS(); refreshDashboard();
   if(typeof refreshReports==='function') refreshReports();
 
-  setTimeout(()=>{
-    if(printerCfg.method==='pdf' || (printerCfg.method==='browser'&&printerCfg.brAuto)){
-      printReceipt(res.order_no, custName, items.map(i=>[i.product_name,i.unit_price,i.quantity]),
-        res.total-res.vat, res.discount||0, res.vat, res.total, payMethod);
-    } else if(confirm('In hóa đơn '+res.order_no+'?')){
-      printReceipt(res.order_no, custName, items.map(i=>[i.product_name,i.unit_price,i.quantity]),
-        res.total-res.vat, res.discount||0, res.vat, res.total, payMethod);
-    }
-  }, 300);
+  // Viết nội dung hóa đơn vào cửa sổ đã mở sẵn từ đầu (tránh bị chặn popup)
+  if(willPrint && printWin && !printWin.closed){
+    const html = buildReceiptHTML(res.order_no, custName, items.map(i=>[i.product_name,i.unit_price,i.quantity]),
+      res.total-res.vat, res.discount||0, res.vat, res.total, payMethod);
+    printWin.document.open();
+    printWin.document.write(html);
+    printWin.document.close();
+    printWin.onload = () => { printWin.focus(); printWin.print(); };
+    // Một số trình duyệt không bắn lại onload khi document đã sẵn — gọi luôn phòng hờ
+    setTimeout(()=>{ try{ printWin.focus(); printWin.print(); }catch(e){} }, 200);
+  } else if(!willPrint && confirm('In hóa đơn '+res.order_no+'?')){
+    printReceipt(res.order_no, custName, items.map(i=>[i.product_name,i.unit_price,i.quantity]),
+      res.total-res.vat, res.discount||0, res.vat, res.total, payMethod);
+  }
 };
 
 // ── Override addProd — gọi API khi online ────────────────────
