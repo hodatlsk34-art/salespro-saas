@@ -1227,10 +1227,16 @@ function openModal(id){
 }
 
 // Xóa sản phẩm
-function delProd(id){
+async function delProd(id){
   const p=PRODUCTS.find(x=>x.id===id);
   if(!p) return;
   if(!confirm('Xóa sản phẩm "'+p.name+'"?')) return;
+
+  if(typeof _useApi!=='undefined' && _useApi){
+    const res = await api('DELETE','/products/'+id);
+    if(!res){ toast('Lỗi xóa sản phẩm trên server','error'); return; }
+  }
+
   const idx=PRODUCTS.indexOf(p);
   PRODUCTS.splice(idx,1);
   renderProds(PRODUCTS);
@@ -1257,20 +1263,31 @@ function editProd(id){
     saveBtn.onclick=()=>updateProd(id);
   },50);
 }
-function updateProd(id){
+async function updateProd(id){
   const p=PRODUCTS.find(x=>x.id===id);
   if(!p) return;
   const name=document.getElementById('np-name').value.trim();
   const cat =document.getElementById('np-cat').value.trim();
   if(!name||!cat){ toast('Vui lòng nhập tên và danh mục','error'); return; }
   if(!PROD_CATS.includes(cat)){ PROD_CATS.push(cat); updateCatFilters(); }
-  Object.assign(p,{
+
+  const newData = {
     name, cat,
     retail:+document.getElementById('np-retail').value||null,
     wholesale:+document.getElementById('np-wholesale').value||null,
     stock:+document.getElementById('np-stock').value||0,
     unit:document.getElementById('np-unit').value||'Cái'
-  });
+  };
+
+  if(typeof _useApi!=='undefined' && _useApi){
+    const res = await api('PUT','/products/'+id, {
+      name: newData.name, emoji: p.emoji||'📦', category: newData.cat, unit: newData.unit,
+      retail_price: newData.retail, wholesale_price: newData.wholesale, stock: newData.stock
+    });
+    if(!res){ toast('Lỗi cập nhật sản phẩm trên server','error'); return; }
+  }
+
+  Object.assign(p, newData);
   renderProds(PRODUCTS); renderPOS();
   closeModal('madd-prod');
   // Reset modal về trạng thái thêm mới
@@ -1489,8 +1506,8 @@ function renderProds(list){
       <td style="color:var(--text2)">${p.unit}</td>
       <td>${stockBadge(p.stock)}</td>
       <td><div style="display:flex;gap:4px">
-        <button class="btn btn-icon btn-sm" onclick="editProd('${p.id}')"><i class="ti ti-edit"></i></button>
-        <button class="btn btn-icon btn-sm" style="color:var(--red)" onclick="delProd('${p.id}')"><i class="ti ti-trash"></i></button>
+        <button class="btn btn-icon btn-sm" onclick="editProd(${JSON.stringify(p.id)})"><i class="ti ti-edit"></i></button>
+        <button class="btn btn-icon btn-sm" style="color:var(--red)" onclick="delProd(${JSON.stringify(p.id)})"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`).join('');
 }
