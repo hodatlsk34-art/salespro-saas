@@ -1923,7 +1923,7 @@ function refreshDashboard(){
   if (bestEl) {
     const today = todayStr();
     const todaySold = {};
-    ORDERS.filter(o=>o.date===today).forEach(o=>o.items.forEach(([name,price,qty])=>{
+    ORDERS.filter(o=>o.date===today).forEach(o=>(o.items||[]).forEach(([name,price,qty])=>{
       if(!todaySold[name]) todaySold[name]={qty:0,rev:0};
       todaySold[name].qty+=qty; todaySold[name].rev+=price*qty;
     }));
@@ -1994,7 +1994,7 @@ function refreshReports() {
 
   // Sản phẩm bán chạy
   const soldMap = {};
-  ORDERS.forEach(o => o.items.forEach(([name,,qty]) => {
+  ORDERS.forEach(o => (o.items||[]).forEach(([name,,qty]) => {
     soldMap[name] = (soldMap[name]||0) + qty;
   }));
   const sorted = Object.entries(soldMap).sort((a,b)=>b[1]-a[1]);
@@ -2011,7 +2011,7 @@ function refreshReports() {
   const totalRevNet = ORDERS.reduce((s,o) => s + (o.sub - (o.disc||0)), 0);
   let totalCost = 0;
   const profitByCat = {}; // {cat: {rev, cost}}
-  ORDERS.forEach(o => o.items.forEach(([name, price, qty]) => {
+  ORDERS.forEach(o => (o.items||[]).forEach(([name, price, qty]) => {
     const prod = PRODUCTS.find(p => p.name === name);
     const unitCost = prod ? (prod.wholesale || prod.retail * 0.7 || 0) : 0; // ước tính 70% nếu thiếu giá vốn
     const lineRev  = price * qty;
@@ -2988,7 +2988,8 @@ window.checkout = async function(){
   toast(`✅ ${res.order_no} — ${custName} — ${fmtM(res.total)}`, 'success');
   ORDERS.push({
     no:res.order_no, custName, total:res.total, sub:res.total-res.vat,
-    vat:res.vat, payMethod, date:todayStr(), time:new Date().toTimeString().slice(0,5)
+    vat:res.vat, payMethod, date:todayStr(), time:new Date().toTimeString().slice(0,5),
+    items: items.map(i=>[i.product_name, i.unit_price, i.quantity])
   });
   Object.values(cart).forEach(i=>{
     const p = PRODUCTS.find(x=>x.name===i.name);
