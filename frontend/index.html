@@ -2771,7 +2771,12 @@ function goTo(s){
   _origGoTo(s);
   if(s==='products')   renderProds(PRODUCTS);
   if(s==='staff')      renderStaff();
-  if(s==='inventory')  renderInv(INV_DATA);
+  if(s==='inventory')  {
+    renderInv(INV_DATA);
+    // Lớp bảo vệ: luôn lấy lại dữ liệu mới nhất từ server khi vào menu
+    // Kho hàng (ví dụ phiếu Xuất kho do POS tự sinh khi bán hàng).
+    syncInventoryOnly();
+  }
   if(s==='roles')      renderRoles();
   if(s==='reports')    refreshReports();
   if(s==='dashboard')  refreshDashboard();
@@ -2952,6 +2957,29 @@ function apiTimeToVN(isoStr){
   return `${h}:${mi}`;
 }
 
+// Đồng bộ riêng dữ liệu Kho hàng từ server (không tải lại toàn bộ sản
+// phẩm/khách hàng/nhân viên) — dùng sau khi bán hàng hoặc khi vào menu
+// Kho hàng, để luôn thấy đúng phiếu Xuất kho mới nhất do backend tự sinh.
+function syncInventoryOnly(){
+  if(typeof _useApi==='undefined' || !_useApi) return;
+  api('GET','/inventory').then(invs=>{
+    if(invs){
+      INV_DATA.length=0;
+      INV_DATA.push(...invs.map(i=>({
+        _id:i.id, code:i.code, type:i.type,
+        label:{NK:'Nhập kho',XK:'Xuất bán',DT:'Đổi trả',KK:'Kiểm kê'}[i.type]||i.type,
+        prod:i.product_name, qty:(i.type==='XK'?'-':'+')+i.quantity,
+        rawQty:i.quantity, price:i.unit_price,
+        total:i.total_value ? i.total_value.toLocaleString('vi-VN')+'đ' : '—',
+        sup:i.supplier_name||'—', date: apiDateToVN(i.created_at),
+        user:i.created_by_name||'—', sl:i.status,
+        sc: i.status==='Đã duyệt' ? 'bg' : i.status==='Chờ duyệt' ? 'ba' : 'br'
+      })));
+      renderInv(INV_DATA);
+    }
+  });
+}
+
 async function syncFromApi(){
   if(!_useApi || !_apiToken) return;
   const [prods, custs, invs, staffs, ords] = await Promise.all([
@@ -3062,6 +3090,11 @@ window.checkout = async function(){
   document.getElementById('cart-no').textContent = 'Đơn hàng #DH'+String(orderNo).padStart(3,'0');
   renderCart(); renderPOS(); renderProds(PRODUCTS); refreshDashboard();
   if(typeof refreshReports==='function') refreshReports();
+
+  // Đồng bộ lại Kho hàng — backend tự sinh phiếu Xuất kho (XK) khi tạo
+  // đơn hàng, nhưng phiếu đó chỉ nằm trên server, chưa có trong bộ nhớ
+  // trình duyệt. Gọi API lấy lại để menu Kho hàng hiện đúng phiếu mới.
+  syncInventoryOnly();
 
   // Viết nội dung hóa đơn vào cửa sổ đã mở sẵn từ đầu (tránh bị chặn popup)
   if(willPrint && printWin && !printWin.closed){
