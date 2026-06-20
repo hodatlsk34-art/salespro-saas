@@ -2769,6 +2769,7 @@ function renderRoles(){
 // ============================================================
 function goTo(s){
   _origGoTo(s);
+  if(s==='products')   renderProds(PRODUCTS);
   if(s==='staff')      renderStaff();
   if(s==='inventory')  renderInv(INV_DATA);
   if(s==='roles')      renderRoles();
@@ -3059,7 +3060,7 @@ window.checkout = async function(){
   });
   cart = {}; orderNo++;
   document.getElementById('cart-no').textContent = 'Đơn hàng #DH'+String(orderNo).padStart(3,'0');
-  renderCart(); renderPOS(); refreshDashboard();
+  renderCart(); renderPOS(); renderProds(PRODUCTS); refreshDashboard();
   if(typeof refreshReports==='function') refreshReports();
 
   // Viết nội dung hóa đơn vào cửa sổ đã mở sẵn từ đầu (tránh bị chặn popup)
