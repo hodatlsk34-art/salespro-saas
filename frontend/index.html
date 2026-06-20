@@ -1055,20 +1055,29 @@ label{font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bot
 </div>
 
 <div id="madd-inv" class="modal-backdrop" style="display:none" onclick="if(event.target===this)closeModal('madd-inv')">
-  <div class="modal"><div class="modal-hdr"><div class="modal-title">Tạo phiếu nhập kho</div><button class="btn btn-icon" onclick="closeModal('madd-inv')"><i class="ti ti-x"></i></button></div>
+  <div class="modal"><div class="modal-hdr"><div class="modal-title">Tạo phiếu kho</div><button class="btn btn-icon" onclick="closeModal('madd-inv')"><i class="ti ti-x"></i></button></div>
   <div class="modal-body">
-    <div class="fr">
+    <div class="fg">
+      <label>Loại phiếu *</label>
+      <select id="ni-type" onchange="switchInvType()">
+        <option value="NK">📥 Nhập kho — nhập hàng từ nhà cung cấp</option>
+        <option value="XK">📤 Xuất kho — xuất hàng thủ công (không qua bán hàng)</option>
+        <option value="DT">🔄 Đổi trả — khách trả hàng hoặc đổi hàng lỗi</option>
+        <option value="KK">📋 Kiểm kê — điều chỉnh tồn kho theo kiểm đếm thực tế</option>
+      </select>
+    </div>
+    <div class="fr" id="ni-sup-row">
       <div class="fg">
-        <label>Nhà cung cấp * <span style="color:var(--text3);font-weight:400">(gõ mới hoặc chọn ▾)</span></label>
+        <label id="ni-sup-label">Nhà cung cấp * <span style="color:var(--text3);font-weight:400">(gõ mới hoặc chọn ▾)</span></label>
         <div class="combo-wrap">
           <input id="ni-sup" class="combo-input" list="sup-list" placeholder="Chọn hoặc nhập NCC mới..." autocomplete="off"/>
           <datalist id="sup-list"></datalist>
           <i class="ti ti-chevron-down combo-arrow"></i>
         </div>
         <div class="tag-list" id="sup-tags"></div>
-        <div class="tag-add-hint">Gõ tên mới rồi nhấn Enter để thêm nhà cung cấp</div>
+        <div class="tag-add-hint" id="ni-sup-hint">Gõ tên mới rồi nhấn Enter để thêm nhà cung cấp</div>
       </div>
-      <div class="fg"><label>Ngày nhập</label><input id="ni-date" value="17/06/2026"/></div>
+      <div class="fg"><label>Ngày</label><input id="ni-date" value="17/06/2026"/></div>
     </div>
     <div class="fr">
       <div class="fg">
@@ -1079,15 +1088,15 @@ label{font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bot
           <i class="ti ti-chevron-down combo-arrow"></i>
         </div>
       </div>
-      <div class="fg"><label>Số lượng *</label><input type="number" id="ni-qty" placeholder="50" min="1" oninput="calcInv()"/></div>
+      <div class="fg"><label id="ni-qty-label">Số lượng *</label><input type="number" id="ni-qty" placeholder="50" min="1" oninput="calcInv()"/></div>
     </div>
-    <div class="fr"><div class="fg"><label>Đơn giá nhập (đ)</label><input type="number" id="ni-price" placeholder="25000" oninput="calcInv()"/></div><div class="fg"><label>Tổng giá trị</label><input id="ni-total" readonly style="background:var(--surface2)"/></div></div>
-    <div class="fg"><label>Ghi chú</label><textarea id="ni-note" rows="2" placeholder="Ghi chú phiếu nhập..."></textarea></div>
-    <div style="background:var(--amber-l);border-left:3px solid var(--amber);padding:8px 12px;border-radius:0 6px 6px 0;font-size:12px;color:var(--amber-d);margin-top:4px">
+    <div class="fr"><div class="fg"><label id="ni-price-label">Đơn giá (đ)</label><input type="number" id="ni-price" placeholder="25000" oninput="calcInv()"/></div><div class="fg"><label>Tổng giá trị</label><input id="ni-total" readonly style="background:var(--surface2)"/></div></div>
+    <div class="fg"><label>Ghi chú</label><textarea id="ni-note" rows="2" placeholder="Ghi chú phiếu..."></textarea></div>
+    <div style="background:var(--amber-l);border-left:3px solid var(--amber);padding:8px 12px;border-radius:0 6px 6px 0;font-size:12px;color:var(--amber-d);margin-top:4px" id="ni-hint-box">
       ⚠️ Phiếu sẽ ở trạng thái <b>Chờ duyệt</b> cho đến khi Quản lý / Chủ cửa hàng xác nhận.
     </div>
   </div>
-  <div class="modal-foot"><button class="btn" onclick="closeModal('madd-inv')">Hủy</button><button class="btn btn-primary" onclick="addInv()"><i class="ti ti-check"></i>Xác nhận nhập kho</button></div></div>
+  <div class="modal-foot"><button class="btn" onclick="closeModal('madd-inv')">Hủy</button><button class="btn btn-primary" onclick="addInv()" id="ni-submit-btn"><i class="ti ti-check"></i>Xác nhận nhập kho</button></div></div>
 </div>
 
 <!-- Modal chỉnh sửa phiếu kho -->
@@ -2297,24 +2306,50 @@ function approveInv(idx){
   }
   const r = INV_DATA[idx];
   if(!r || r.sl !== 'Chờ duyệt'){ toast('Phiếu này không ở trạng thái Chờ duyệt','error'); return; }
-  // Cập nhật tồn kho sản phẩm nếu là phiếu nhập
-  if(r.type==='NK'){
-    const prod = PRODUCTS.find(p=>p.name===r.prod);
-    if(prod){
-      prod.stock += r.rawQty||0;
-      renderProds(PRODUCTS);
-      renderPOS();
-    }
+
+  // ── Mode ONLINE ──────────────────────────────────────────────
+  if(typeof _useApi!=='undefined' && _useApi && r._id){
+    api('PUT','/inventory/'+r._id+'/approve', {action:'approve'}).then(res=>{
+      if(!res){ toast('Lỗi duyệt phiếu trên server','error'); return; }
+      syncFromApi();
+      refreshDashboard();
+      if(typeof refreshReports==='function') refreshReports();
+      toast(`✅ Đã duyệt phiếu ${r.code}`, 'success');
+    });
+    return;
   }
+
+  // ── Mode OFFLINE: cộng/trừ tồn kho theo đúng loại phiếu ──────
+  const prod = PRODUCTS.find(p=>p.name===r.prod);
+  if(prod){
+    if(r.type==='NK' || r.type==='DT'){
+      // Nhập kho & Đổi trả (khách trả hàng) → CỘNG tồn
+      prod.stock += r.rawQty||0;
+    } else if(r.type==='XK'){
+      // Xuất kho thủ công → TRỪ tồn
+      prod.stock = Math.max(0, prod.stock - (r.rawQty||0));
+    } else if(r.type==='KK'){
+      // Kiểm kê → cộng/trừ theo đúng dấu chênh lệch đã nhập
+      prod.stock = Math.max(0, prod.stock + (r.rawQty||0));
+    }
+    renderProds(PRODUCTS);
+    renderPOS();
+  }
+
   r.sl       = 'Đã duyệt';
   r.approver = currentUser.name;
   r.approvedAt = todayStr();
   renderInv(INV_DATA);
   autoSave('approveInv');
+
+  // Cập nhật Dashboard & Báo cáo ngay (sửa lỗi không tự cập nhật)
+  refreshDashboard();
+  if(typeof refreshReports==='function') refreshReports();
+
   // Cập nhật metric
   const ep = document.getElementById('inv-pending');
   if(ep) ep.textContent = INV_DATA.filter(x=>x.sl==='Chờ duyệt').length;
-  toast(`✅ Đã duyệt phiếu ${r.code} — ${r.prod} (+${r.rawQty||r.qty})`, 'success');
+  toast(`✅ Đã duyệt phiếu ${r.code} — ${r.prod} (${r.qty})`, 'success');
 }
 
 function rejectInv(idx){
@@ -2324,8 +2359,19 @@ function rejectInv(idx){
   const r = INV_DATA[idx];
   if(!r || r.sl !== 'Chờ duyệt') return;
   if(!confirm(`Từ chối phiếu ${r.code} — ${r.prod}?\nPhiếu sẽ bị đánh dấu Từ chối và không cập nhật tồn kho.`)) return;
+
+  if(typeof _useApi!=='undefined' && _useApi && r._id){
+    api('PUT','/inventory/'+r._id+'/approve', {action:'reject'}).then(res=>{
+      if(!res){ toast('Lỗi từ chối phiếu trên server','error'); return; }
+      syncFromApi();
+      toast(`❌ Đã từ chối phiếu ${r.code}`, 'info');
+    });
+    return;
+  }
+
   r.sl = 'Từ chối';
   renderInv(INV_DATA);
+  autoSave('rejectInv');
   toast(`❌ Đã từ chối phiếu ${r.code}`, 'info');
 }
 
@@ -2399,21 +2445,98 @@ function calcInv(){
   document.getElementById('ni-total').value = q&&p ? (q*p).toLocaleString('vi-VN')+'đ' : '';
 }
 
+// Đổi giao diện modal theo loại phiếu được chọn
+function switchInvType(){
+  const type = document.getElementById('ni-type').value;
+  const supRow   = document.getElementById('ni-sup-row');
+  const supLabel = document.getElementById('ni-sup-label');
+  const supHint  = document.getElementById('ni-sup-hint');
+  const qtyLabel = document.getElementById('ni-qty-label');
+  const priceLabel = document.getElementById('ni-price-label');
+  const hintBox  = document.getElementById('ni-hint-box');
+  const submitBtn= document.getElementById('ni-submit-btn');
+  const modalTitle = document.querySelector('#madd-inv .modal-title');
+
+  const cfg = {
+    NK: { title:'Tạo phiếu nhập kho', sup:'Nhà cung cấp', supShow:true,
+          qty:'Số lượng nhập *', price:'Đơn giá nhập (đ)',
+          hint:'⚠️ Phiếu sẽ ở trạng thái <b>Chờ duyệt</b> cho đến khi Quản lý / Chủ cửa hàng xác nhận.',
+          btn:'Xác nhận nhập kho' },
+    XK: { title:'Tạo phiếu xuất kho', sup:'Lý do xuất / Người nhận', supShow:true,
+          qty:'Số lượng xuất *', price:'Đơn giá (đ)',
+          hint:'⚠️ Dùng cho xuất kho thủ công (biếu tặng, hủy hỏng...) — KHÔNG dùng cho bán hàng (POS tự tạo phiếu xuất riêng).',
+          btn:'Xác nhận xuất kho' },
+    DT: { title:'Tạo phiếu đổi trả', sup:'Khách hàng / Lý do đổi trả', supShow:true,
+          qty:'Số lượng trả lại *', price:'Đơn giá hoàn (đ)',
+          hint:'🔄 Đổi trả: hàng được <b>khách trả lại</b> sẽ <b>CỘNG vào tồn kho</b>. Dùng khi khách trả hàng lỗi hoặc đổi sản phẩm khác.',
+          btn:'Xác nhận đổi trả' },
+    KK: { title:'Tạo phiếu kiểm kê', sup:'Người kiểm kê', supShow:true,
+          qty:'Chênh lệch số lượng * (+/-)', price:'',
+          hint:'📋 Kiểm kê: nhập <b>số dương</b> nếu tồn thực tế NHIỀU hơn hệ thống, nhập <b>số âm</b> (VD: -5) nếu ÍT hơn. Hệ thống tự điều chỉnh đúng theo số kiểm đếm thực tế.',
+          btn:'Xác nhận kiểm kê' },
+  };
+  const c = cfg[type];
+  modalTitle.textContent = c.title;
+  supLabel.innerHTML = c.sup + ' * <span style="color:var(--text3);font-weight:400">(gõ mới hoặc chọn ▾)</span>';
+  supHint.style.display = c.supShow ? 'block' : 'none';
+  qtyLabel.textContent = c.qty;
+  priceLabel.textContent = c.price || 'Đơn giá (đ)';
+  hintBox.innerHTML = c.hint;
+  submitBtn.innerHTML = '<i class="ti ti-check"></i>' + c.btn;
+
+  // KK cho phép số âm
+  document.getElementById('ni-qty').min = (type==='KK') ? '' : '1';
+}
+
 function addInv(){
+  const type = (document.getElementById('ni-type')||{value:'NK'}).value;
   const sup  = (document.getElementById('ni-sup')||{}).value||'';
   const prod = (document.getElementById('ni-prod')||{}).value||'';
   const qty  = +(document.getElementById('ni-qty')||{value:0}).value||0;
   const price= +((document.getElementById('ni-price')||{}).value||0);
   const note = (document.getElementById('ni-note')||{}).value||'';
-  if(!sup){  toast('Vui lòng nhập nhà cung cấp','error'); return; }
+
+  if(!sup){  toast('Vui lòng nhập thông tin bắt buộc','error'); return; }
   if(!prod){ toast('Vui lòng nhập sản phẩm','error'); return; }
   if(!qty){  toast('Vui lòng nhập số lượng','error'); return; }
+  if(type!=='KK' && qty<0){ toast('Số lượng phải lớn hơn 0','error'); return; }
+
   if(!SUPPLIERS.includes(sup)) SUPPLIERS.push(sup);
-  const code  = '#NK0'+(String(INV_DATA.length+1).padStart(3,'0'));
-  const total = price && qty ? (price*qty).toLocaleString('vi-VN')+'đ' : '—';
+
+  const labelMap = {NK:'Nhập kho', XK:'Xuất kho', DT:'Đổi trả', KK:'Kiểm kê'};
+  const prefixMap = {NK:'+', XK:'-', DT:'+', KK: qty>=0?'+':''};
+  const rawQty = (type==='KK') ? qty : Math.abs(qty);   // KK giữ dấu, còn lại luôn dương
+  const qtyDisplay = (type==='KK')
+    ? (qty>=0?'+':'') + qty
+    : prefixMap[type] + Math.abs(qty);
+
+  const prod_obj = PRODUCTS.find(p=>p.name===prod);
+
+  // ── Mode ONLINE: gọi API thật ──────────────────────────────
+  if(typeof _useApi!=='undefined' && _useApi){
+    api('POST','/inventory', {
+      type, product_id: prod_obj?prod_obj.id:null, product_name: prod,
+      quantity: rawQty, unit_price: price||null, supplier_name: sup, note
+    }).then(res=>{
+      if(!res){ toast('Lỗi tạo phiếu trên server','error'); return; }
+      closeModal('madd-inv');
+      syncFromApi();
+      toast(`✅ Đã tạo phiếu ${res.code||''} (${labelMap[type]})`, 'success');
+      ['ni-sup','ni-prod','ni-qty','ni-price','ni-total','ni-note'].forEach(id=>{
+        const el=document.getElementById(id); if(el) el.value='';
+      });
+    });
+    return;
+  }
+
+  // ── Mode OFFLINE: lưu local ─────────────────────────────────
+  const prefix = type==='NK' ? 'NK' : type==='XK' ? 'XK' : type==='DT' ? 'DT' : 'KK';
+  const code  = '#'+prefix+'0'+(String(INV_DATA.length+1).padStart(3,'0'));
+  const total = price && rawQty ? (price*rawQty).toLocaleString('vi-VN')+'đ' : '—';
+
   INV_DATA.unshift({
-    code, type:'NK', label:'Nhập kho', prod,
-    qty:'+'+qty, rawQty:qty, price, total, sup,
+    code, type, label: labelMap[type], prod,
+    qty: qtyDisplay, rawQty, price, total, sup,
     date:todayStr(), user:currentUser?currentUser.name:'—',
     sl:'Chờ duyệt', note,
     sc:'ba'
@@ -2421,11 +2544,11 @@ function addInv(){
   renderInv(INV_DATA);
   autoSave('addInv');
   closeModal('madd-inv');
+
   const needApprove = !canApprove();
-  if(needApprove)
-    toast(`✅ Tạo phiếu ${code} — Chờ Quản lý / Chủ cửa hàng duyệt`, 'success');
-  else
-    toast(`✅ Tạo phiếu ${code} — Bạn có thể duyệt ngay phiếu này`, 'success');
+  toast(needApprove
+    ? `✅ Tạo phiếu ${code} — Chờ Quản lý / Chủ cửa hàng duyệt`
+    : `✅ Tạo phiếu ${code} — Bạn có thể duyệt ngay phiếu này`, 'success');
   ['ni-sup','ni-prod','ni-qty','ni-price','ni-total','ni-note'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
